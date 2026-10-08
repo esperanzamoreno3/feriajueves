@@ -388,10 +388,13 @@
 
     let userIp = "";
     try {
-      const resIp = await fetch("https://api.ipify.org?format=json");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 600); // Máximo 600 ms de espera
+      const resIp = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+      clearTimeout(timeoutId);
       const dataIp = await resIp.json();
       userIp = dataIp.ip || "";
-    } catch(e) {}
+    } catch(e) {} 
 
     const deviceId = obtenerDeviceId();
     localStorage.removeItem("admin_forzar_premio");
