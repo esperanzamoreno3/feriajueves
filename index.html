@@ -257,7 +257,7 @@
   const PIN_ADMIN = "2024";
   const TIEMPO_BLOQUEO_MS = 60 * 60 * 1000;
 
-  // Precarga silenciosa de la IP al abrir la página
+  // Precarga silenciosa de la IP en segundo plano
   let cachedUserIp = "";
   fetch("https://api.ipify.org?format=json")
     .then(r => r.json())
@@ -393,34 +393,36 @@
     const deviceId = obtenerDeviceId();
     localStorage.removeItem("admin_forzar_premio");
 
-    // DISPARO DE PETICIÓN EN SEGUNDO PLANO
-    const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(cachedUserIp)}&did=${encodeURIComponent(deviceId)}&admin=${forzar}`;
-    const promesaBackend = fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" })
-      .then(res => res.json())
-      .catch(err => ({ status: "ERROR" }));
-
-    // GIRO INMEDIATO DE LA RULETA (CERO ESPERA VISUAL)
-    let anguloBase = currentAngle;
-    let animando = true;
     let servidorRespondio = false;
     let dataRespuesta = null;
 
-    promesaBackend.then(data => {
-      dataRespuesta = data;
-      servidorRespondio = true;
-    });
+    // Disparo inmediato de la petición en segundo plano
+    const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(cachedUserIp)}&did=${encodeURIComponent(deviceId)}&admin=${forzar}`;
+    fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" })
+      .then(res => res.json())
+      .then(data => {
+        dataRespuesta = data;
+        servidorRespondio = true;
+      })
+      .catch(() => {
+        dataRespuesta = { status: "OK", targetType: "nada", nombrePremio: "NO PREMIO" };
+        servidorRespondio = true;
+      });
 
-    const inicioAnim = performance.now();
+    const tiempoInicio = performance.now();
 
+    // Bucle de giro inmediato con tope de seguridad de 3.5 segundos
     function bucleGiro(tiempoActual) {
-      if (!servidorRespondio) {
-        // Giro continuo y fluido mientras el servidor responde
-        currentAngle += 0.22;
-        dibujarRuleta();
-        requestAnimationFrame(bucleGiro);
+      currentAngle += 0.22;
+      dibujarRuleta();
+
+      const tiempoGirando = tiempoActual - tiempoInicio;
+
+      if (servidorRespondio || tiempoGirando > 3500) {
+        const respuestaFinal = dataRespuesta || { status: "OK", targetType: "nada", nombrePremio: "NO PREMIO" };
+        finalizarGiroConResultado(respuestaFinal, forzar);
       } else {
-        // En cuanto responde el servidor, calcula la parada perfecta
-        finalizarGiroConResultado(dataRespuesta, forzar);
+        requestAnimationFrame(bucleGiro);
       }
     }
     requestAnimationFrame(bucleGiro);
@@ -430,12 +432,12 @@
     if (!data || data.status !== "OK") {
       girando = false;
       spinBtn.disabled = false;
-      if (data && data.status === "ERROR") {
-        mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
-      } else if (data && data.mensaje) {
+      if (data && data.mensaje) {
         mostrarAviso(data.mensaje);
         spinBtn.disabled = true;
         spinBtn.textContent = "BLOQUEADO";
+      } else {
+        mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
       }
       return;
     }
