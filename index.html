@@ -255,14 +255,7 @@
 <script>
   const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxy7LVB3JKpj6oqqke26mR9U1Z6QM1VHA0XdYLaNBya0cZ-N2f71UrxKrLhKtKRfhqsWA/exec";
   const PIN_ADMIN = "2024";
-  const TIEMPO_BLOQUEO_MS = 60 * 60 * 1000;
-
-  // Precarga silenciosa de la IP en segundo plano
-  let cachedUserIp = "";
-  fetch("https://api.ipify.org?format=json")
-    .then(r => r.json())
-    .then(d => { cachedUserIp = d.ip || ""; })
-    .catch(() => {});
+  const TIEMPO_BLOQUEO_MS = 60 * 60 * 1000; // 1 hora de bloqueo
 
   const sectores = [
     { text: "SUERTE", color: "#1e1e24", type: "nada" },
@@ -285,34 +278,6 @@
 
   let currentAngle = 0;
   let girando = false;
-
-  function obtenerDeviceId() {
-    try {
-      const glCanvas = document.createElement("canvas");
-      const gl = glCanvas.getContext("webgl") || glCanvas.getContext("experimental-webgl");
-      let gpuRenderer = "";
-      if (gl) {
-        const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-        gpuRenderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : "";
-      }
-      const raw = [
-        screen.width + "x" + screen.height,
-        screen.colorDepth,
-        navigator.hardwareConcurrency || "",
-        navigator.platform || "",
-        gpuRenderer
-      ].join("###");
-
-      let hash = 5381;
-      for (let i = 0; i < raw.length; i++) {
-        hash = ((hash << 5) + hash) + raw.charCodeAt(i);
-        hash = hash & hash;
-      }
-      return "dev_" + Math.abs(hash).toString(16);
-    } catch(e) {
-      return "dev_standard";
-    }
-  }
 
   function dibujarRuleta() {
     const numSectores = sectores.length;
@@ -388,66 +353,50 @@
     spinBtn.disabled = true;
     premioBox.style.display = "none";
     bannerAviso.style.display = "none";
-    resDiv.innerHTML = "";
+    resDiv.innerHTML = "<p style='color:#ffd700; font-size:0.9rem;'>Validando conexión...</p>";
 
-    const deviceId = obtenerDeviceId();
+    let userIp = "";
+    try {
+      const resIp = await fetch("https://api.ipify.org?format=json");
+      const dataIp = await resIp.json();
+      userIp = dataIp.ip || "";
+    } catch(e) {}
+
     localStorage.removeItem("admin_forzar_premio");
 
-    let servidorRespondio = false;
-    let dataRespuesta = null;
+    let targetType = "nada";
+    let nombrePremio = "NO PREMIO";
 
-    // Disparo inmediato de la petición en segundo plano
-    const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(cachedUserIp)}&did=${encodeURIComponent(deviceId)}&admin=${forzar}`;
-    fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" })
-      .then(res => res.json())
-      .then(data => {
-        dataRespuesta = data;
-        servidorRespondio = true;
-      })
-      .catch(() => {
-        dataRespuesta = { status: "OK", targetType: "nada", nombrePremio: "NO PREMIO" };
-        servidorRespondio = true;
-      });
+    try {
+      const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(userIp)}&admin=${forzar}`;
+      const response = await fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" });
+      const data = await response.json();
 
-    const tiempoInicio = performance.now();
-
-    // Bucle de giro inmediato con tope de seguridad de 3.5 segundos
-    function bucleGiro(tiempoActual) {
-      currentAngle += 0.22;
-      dibujarRuleta();
-
-      const tiempoGirando = tiempoActual - tiempoInicio;
-
-      if (servidorRespondio || tiempoGirando > 3500) {
-        const respuestaFinal = dataRespuesta || { status: "OK", targetType: "nada", nombrePremio: "NO PREMIO" };
-        finalizarGiroConResultado(respuestaFinal, forzar);
-      } else {
-        requestAnimationFrame(bucleGiro);
-      }
-    }
-    requestAnimationFrame(bucleGiro);
-  }
-
-  function finalizarGiroConResultado(data, forzar) {
-    if (!data || data.status !== "OK") {
-      girando = false;
-      spinBtn.disabled = false;
-      if (data && data.mensaje) {
+      if (data.status !== "OK") {
+        resDiv.innerHTML = "";
         mostrarAviso(data.mensaje);
         spinBtn.disabled = true;
         spinBtn.textContent = "BLOQUEADO";
-      } else {
-        mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
+        girando = false;
+        return;
       }
+
+      targetType = data.targetType;
+      nombrePremio = data.nombrePremio;
+
+      if (!forzar) {
+        localStorage.setItem("ultima_tirada_jueves", Date.now().toString());
+      }
+
+    } catch(err) {
+      mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
+      spinBtn.disabled = false;
+      girando = false;
+      resDiv.innerHTML = "";
       return;
     }
 
-    const targetType = data.targetType;
-    const nombrePremio = data.nombrePremio;
-
-    if (!forzar) {
-      localStorage.setItem("ultima_tirada_jueves", Date.now().toString());
-    }
+    resDiv.innerHTML = "";
 
     const sectoresValidos = [];
     sectores.forEach((sec, idx) => {
@@ -456,23 +405,23 @@
     const elegidoIdx = sectoresValidos[Math.floor(Math.random() * sectoresValidos.length)] || 0;
 
     const arc = (2 * Math.PI) / sectores.length;
-    const vueltasExtra = 4 * 2 * Math.PI;
+    const vueltas = 5 * 2 * Math.PI;
     const anguloDestino = (3 * Math.PI / 2) - (elegidoIdx * arc) - (arc / 2);
-    const anguloFinal = currentAngle + vueltasExtra + ((anguloDestino - (currentAngle % (2 * Math.PI)) + 4 * Math.PI) % (2 * Math.PI));
+    const anguloFinal = currentAngle + vueltas + ((anguloDestino - (currentAngle % (2 * Math.PI)) + 4 * Math.PI) % (2 * Math.PI));
 
-    const inicioFrenado = performance.now();
-    const duracionFrenado = 3000;
+    const inicio = performance.now();
+    const duracion = 4500;
     const anguloInicial = currentAngle;
 
-    function animarFrenado(ahora) {
-      const transcurrido = ahora - inicioFrenado;
-      const progreso = Math.min(transcurrido / duracionFrenado, 1);
+    function animar(ahora) {
+      const transcurrido = ahora - inicio;
+      const progreso = Math.min(transcurrido / duracion, 1);
       const easeOut = 1 - Math.pow(1 - progreso, 3);
       currentAngle = anguloInicial + (anguloFinal - anguloInicial) * easeOut;
       dibujarRuleta();
 
       if (progreso < 1) {
-        requestAnimationFrame(animarFrenado);
+        requestAnimationFrame(animar);
       } else {
         girando = false;
         if (targetType === "nada") {
@@ -487,7 +436,7 @@
         }
       }
     }
-    requestAnimationFrame(animarFrenado);
+    requestAnimationFrame(animar);
   }
 
   // DESLIZADOR DE CANJEO
