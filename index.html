@@ -94,13 +94,11 @@
       box-shadow: 0 4px 14px rgba(234,179,8,0.4);
     }
     .btn:disabled {
-      opacity: 0.45;
+      opacity: 0.5;
       cursor: not-allowed;
-      background: #4b5563;
-      color: #d1d5db;
-      box-shadow: none;
     }
 
+    /* CAJA DE PREMIO Y BOTÓN DESLIZADOR */
     .premio-box {
       display: none;
       background: rgba(34, 197, 94, 0.15);
@@ -169,17 +167,18 @@
       min-height: 20px;
     }
 
+    /* AVISO INTEGRADO ELEGANTE (SIN POP-UP DEL NAVEGADOR) */
     .banner-aviso {
       display: none;
       background: rgba(239, 68, 68, 0.15);
       border: 1px solid #ef4444;
       color: #fca5a5;
       font-weight: 600;
-      font-size: 0.85rem;
-      padding: 10px 12px;
+      font-size: 0.88rem;
+      padding: 12px 14px;
       border-radius: 12px;
-      margin-top: 10px;
-      line-height: 1.35;
+      margin-top: 12px;
+      line-height: 1.4;
     }
 
     .admin-modal {
@@ -219,7 +218,7 @@
 <div class="card">
   <img src="IMG_5861.jpg" alt="Caseta El Resucitado" class="logo-header" id="adminTrigger" onerror="this.style.display='none'">
   <h1>RULETA EL RESUCITADO</h1>
-  <div class="dia-tag">JUEVES DE FERIA</div>
+  <div class="dia-tag">MIÉRCOLES DE FERIA</div>
   <p style="font-size: 0.85rem; color: #ddd; margin-bottom: 8px;">¡Gira y prueba tu suerte en la barra!</p>
 
   <div class="wheel-container">
@@ -229,6 +228,7 @@
 
   <button class="btn" id="spinBtn" onclick="girarRuleta()">¡PROBAR SUERTE!</button>
 
+  <!-- BANNER PARA MENSAJES DE ERROR/HORARIO/IP DENTRO DEL DISEÑO -->
   <div class="banner-aviso" id="bannerAviso"></div>
 
   <div class="premio-box" id="premioBox">
@@ -241,13 +241,16 @@
   </div>
 
   <div id="resultado"></div>
+
+  <footer style="margin-top: 14px; font-size: 0.72rem; color: rgba(255,255,255,0.4);">
+    Desarrollado por <strong style="color: rgba(255,215,0,0.65);">Esperanza Moreno</strong>
+  </footer>
 </div>
 
 <div class="admin-modal" id="adminModal">
   <div class="admin-content">
     <h3 style="color:#ffd700; margin-bottom:12px;">🛡️ Panel Administrador</h3>
     <button class="admin-btn" onclick="activarPremioForzado()">🎁 Forzar Premio Siguiente Tirada</button>
-    <button class="admin-btn" style="background:#2563eb;" onclick="limpiarBloqueoLocal()">🔄 Resetear Bloqueo de este móvil</button>
     <button class="admin-btn" style="background:#4b5563;" onclick="cerrarAdmin()">Cerrar</button>
   </div>
 </div>
@@ -255,7 +258,6 @@
 <script>
   const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxy7LVB3JKpj6oqqke26mR9U1Z6QM1VHA0XdYLaNBya0cZ-N2f71UrxKrLhKtKRfhqsWA/exec";
   const PIN_ADMIN = "2024";
-  const TIEMPO_BLOQUEO_MS = 60 * 60 * 1000; // 1 hora de bloqueo
 
   const sectores = [
     { text: "SUERTE", color: "#1e1e24", type: "nada" },
@@ -323,32 +325,8 @@
     }
   }
 
-  function revisarBloqueoPrevio() {
-    const ultimaTirada = localStorage.getItem("ultima_tirada_jueves");
-    if (ultimaTirada) {
-      const tiempoPasado = Date.now() - parseInt(ultimaTirada, 10);
-      if (tiempoPasado < TIEMPO_BLOQUEO_MS) {
-        const minRestantes = Math.ceil((TIEMPO_BLOQUEO_MS - tiempoPasado) / 60000);
-        spinBtn.disabled = true;
-        spinBtn.textContent = "YA HAS JUGADO";
-        mostrarAviso(`⏳ Ya has tirado con este móvil. Espera <b>${minRestantes} min</b> para volver a probar suerte.`);
-        return true;
-      } else {
-        localStorage.removeItem("ultima_tirada_jueves");
-      }
-    }
-    return false;
-  }
-  revisarBloqueoPrevio();
-
   async function girarRuleta() {
     if (girando) return;
-
-    const forzar = localStorage.getItem("admin_forzar_premio") === "true";
-    if (!forzar && revisarBloqueoPrevio()) {
-      return;
-    }
-
     girando = true;
     spinBtn.disabled = true;
     premioBox.style.display = "none";
@@ -362,6 +340,7 @@
       userIp = dataIp.ip || "";
     } catch(e) {}
 
+    const forzar = localStorage.getItem("admin_forzar_premio") === "true";
     localStorage.removeItem("admin_forzar_premio");
 
     let targetType = "nada";
@@ -383,11 +362,6 @@
 
       targetType = data.targetType;
       nombrePremio = data.nombrePremio;
-
-      if (!forzar) {
-        localStorage.setItem("ultima_tirada_jueves", Date.now().toString());
-      }
-
     } catch(err) {
       mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
       spinBtn.disabled = false;
@@ -439,7 +413,7 @@
     requestAnimationFrame(animar);
   }
 
-  // DESLIZADOR DE CANJEO
+  // DESLIZADOR TÁCTIL PARA CANJEAR
   const sliderTrack = document.getElementById("sliderTrack");
   const sliderHandle = document.getElementById("sliderHandle");
   const sliderText = document.getElementById("sliderText");
@@ -498,7 +472,7 @@
   window.addEventListener("touchmove", onDrag, { passive: true });
   window.addEventListener("touchend", endDrag);
 
-  // Panel Secreto (5 toques sobre el logo)
+  // Panel Secreto (5 toques)
   let toques = 0;
   let timerToques;
   document.getElementById("adminTrigger").addEventListener("click", () => {
@@ -526,19 +500,9 @@
     mostrarAviso("🎁 ¡Premio forzado listo para la siguiente tirada!", true);
     cerrarAdmin();
   }
-
-  function limpiarBloqueoLocal() {
-    localStorage.removeItem("ultima_tirada_jueves");
-    spinBtn.disabled = false;
-    spinBtn.textContent = "¡PROBAR SUERTE!";
-    bannerAviso.style.display = "none";
-    mostrarAviso("🔄 Bloqueo reseteado para este dispositivo.", true);
-    cerrarAdmin();
-  }
-
   function cerrarAdmin() {
     document.getElementById("adminModal").style.display = "none";
   }
 </script>
 </body>
-</html> 
+</html>  
