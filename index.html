@@ -257,6 +257,13 @@
   const PIN_ADMIN = "2024";
   const TIEMPO_BLOQUEO_MS = 60 * 60 * 1000;
 
+  // Precarga silenciosa de la IP al abrir la página
+  let cachedUserIp = "";
+  fetch("https://api.ipify.org?format=json")
+    .then(r => r.json())
+    .then(d => { cachedUserIp = d.ip || ""; })
+    .catch(() => {});
+
   const sectores = [
     { text: "SUERTE", color: "#1e1e24", type: "nada" },
     { text: "1 CHUPITO", color: "#7c3aed", type: "chupito" },
@@ -279,7 +286,6 @@
   let currentAngle = 0;
   let girando = false;
 
-  // GENERADOR DE HUELLA DIGITAL DE DISPOSITIVO (Canvas + Pantalla + GPU)
   function obtenerDeviceId() {
     try {
       const glCanvas = document.createElement("canvas");
@@ -297,7 +303,6 @@
         gpuRenderer
       ].join("###");
 
-      // Hash djb2
       let hash = 5381;
       for (let i = 0; i < raw.length; i++) {
         hash = ((hash << 5) + hash) + raw.charCodeAt(i);
@@ -353,7 +358,6 @@
     }
   }
 
-  // Comprobación local básica
   function revisarBloqueoPrevio() {
     const ultimaTirada = localStorage.getItem("ultima_tirada_jueves");
     if (ultimaTirada) {
@@ -384,54 +388,64 @@
     spinBtn.disabled = true;
     premioBox.style.display = "none";
     bannerAviso.style.display = "none";
-    resDiv.innerHTML = "<p style='color:#ffd700; font-size:0.9rem;'>Validando conexión...</p>";
-
-    let userIp = "";
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 600); // Máximo 600 ms de espera
-      const resIp = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
-      clearTimeout(timeoutId);
-      const dataIp = await resIp.json();
-      userIp = dataIp.ip || "";
-    } catch(e) {} 
+    resDiv.innerHTML = "";
 
     const deviceId = obtenerDeviceId();
     localStorage.removeItem("admin_forzar_premio");
 
-    let targetType = "nada";
-    let nombrePremio = "NO PREMIO";
+    // DISPARO DE PETICIÓN EN SEGUNDO PLANO
+    const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(cachedUserIp)}&did=${encodeURIComponent(deviceId)}&admin=${forzar}`;
+    const promesaBackend = fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" })
+      .then(res => res.json())
+      .catch(err => ({ status: "ERROR" }));
 
-    try {
-      const endpoint = `${GOOGLE_SCRIPT_URL}?ip=${encodeURIComponent(userIp)}&did=${encodeURIComponent(deviceId)}&admin=${forzar}`;
-      const response = await fetch(endpoint, { method: "GET", mode: "cors", redirect: "follow" });
-      const data = await response.json();
+    // GIRO INMEDIATO DE LA RULETA (CERO ESPERA VISUAL)
+    let anguloBase = currentAngle;
+    let animando = true;
+    let servidorRespondio = false;
+    let dataRespuesta = null;
 
-      if (data.status !== "OK") {
-        resDiv.innerHTML = "";
+    promesaBackend.then(data => {
+      dataRespuesta = data;
+      servidorRespondio = true;
+    });
+
+    const inicioAnim = performance.now();
+
+    function bucleGiro(tiempoActual) {
+      if (!servidorRespondio) {
+        // Giro continuo y fluido mientras el servidor responde
+        currentAngle += 0.22;
+        dibujarRuleta();
+        requestAnimationFrame(bucleGiro);
+      } else {
+        // En cuanto responde el servidor, calcula la parada perfecta
+        finalizarGiroConResultado(dataRespuesta, forzar);
+      }
+    }
+    requestAnimationFrame(bucleGiro);
+  }
+
+  function finalizarGiroConResultado(data, forzar) {
+    if (!data || data.status !== "OK") {
+      girando = false;
+      spinBtn.disabled = false;
+      if (data && data.status === "ERROR") {
+        mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
+      } else if (data && data.mensaje) {
         mostrarAviso(data.mensaje);
         spinBtn.disabled = true;
         spinBtn.textContent = "BLOQUEADO";
-        girando = false;
-        return;
       }
-
-      targetType = data.targetType;
-      nombrePremio = data.nombrePremio;
-
-      if (!forzar) {
-        localStorage.setItem("ultima_tirada_jueves", Date.now().toString());
-      }
-
-    } catch(err) {
-      mostrarAviso("⚠️ Error de conexión con el servidor. Inténtalo de nuevo.");
-      spinBtn.disabled = false;
-      girando = false;
-      resDiv.innerHTML = "";
       return;
     }
 
-    resDiv.innerHTML = "";
+    const targetType = data.targetType;
+    const nombrePremio = data.nombrePremio;
+
+    if (!forzar) {
+      localStorage.setItem("ultima_tirada_jueves", Date.now().toString());
+    }
 
     const sectoresValidos = [];
     sectores.forEach((sec, idx) => {
@@ -440,23 +454,23 @@
     const elegidoIdx = sectoresValidos[Math.floor(Math.random() * sectoresValidos.length)] || 0;
 
     const arc = (2 * Math.PI) / sectores.length;
-    const vueltas = 5 * 2 * Math.PI;
+    const vueltasExtra = 4 * 2 * Math.PI;
     const anguloDestino = (3 * Math.PI / 2) - (elegidoIdx * arc) - (arc / 2);
-    const anguloFinal = currentAngle + vueltas + ((anguloDestino - (currentAngle % (2 * Math.PI)) + 4 * Math.PI) % (2 * Math.PI));
+    const anguloFinal = currentAngle + vueltasExtra + ((anguloDestino - (currentAngle % (2 * Math.PI)) + 4 * Math.PI) % (2 * Math.PI));
 
-    const inicio = performance.now();
-    const duracion = 4500;
+    const inicioFrenado = performance.now();
+    const duracionFrenado = 3000;
     const anguloInicial = currentAngle;
 
-    function animar(ahora) {
-      const transcurrido = ahora - inicio;
-      const progreso = Math.min(transcurrido / duracion, 1);
+    function animarFrenado(ahora) {
+      const transcurrido = ahora - inicioFrenado;
+      const progreso = Math.min(transcurrido / duracionFrenado, 1);
       const easeOut = 1 - Math.pow(1 - progreso, 3);
       currentAngle = anguloInicial + (anguloFinal - anguloInicial) * easeOut;
       dibujarRuleta();
 
       if (progreso < 1) {
-        requestAnimationFrame(animar);
+        requestAnimationFrame(animarFrenado);
       } else {
         girando = false;
         if (targetType === "nada") {
@@ -471,7 +485,7 @@
         }
       }
     }
-    requestAnimationFrame(animar);
+    requestAnimationFrame(animarFrenado);
   }
 
   // DESLIZADOR DE CANJEO
